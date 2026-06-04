@@ -1,5 +1,7 @@
 # 🚀 GenAI Starter Workspace
 
+![Workspace Preview](assets/starter_preview.png)
+
 Welcome to your Generative AI development hub. This workspace contains two professional-grade AI applications built using LangChain, LangGraph, and Gemini.
 
 ---

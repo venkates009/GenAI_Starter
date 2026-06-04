@@ -1,9 +1,9 @@
 from typing import TypedDict, List
 
-class AgentState(TypedDict):
+class ArchitectState(TypedDict):
+    task_description: str
+    plan: str
     code: str
     review_feedback: List[str]
-    test_results: str
-    test_code: str  # New field for generated unit tests
     iteration: int
     status: str

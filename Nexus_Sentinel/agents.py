@@ -1,16 +1,14 @@
 import os
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_ollama import ChatOllama
 from state import AgentState
 
-# Load environment variables
+# Load environment variables (kept for other configs if needed)
 load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
 
-# Initialize the LLM
-# LangGraph nodes are just functions that take 'state' and return 'updates to state'
-llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", google_api_key=api_key)
+# Initialize the Local LLM (Ollama)
+# No API Key needed for local run!
+llm = ChatOllama(model="gemma2:2b")
 
 def reviewer_node(state: AgentState):
     print("--- REVIEWING CODE ---")
@@ -25,10 +23,9 @@ def reviewer_node(state: AgentState):
     
     Provide a concise list of issues found. If the code is perfect, say 'NO_ISSUES'."""
     
-    response = llm.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=f"Code to review:\n\n{code}")
-    ])
+    prompt = f"""{system_prompt}\n\nCode to review:\n\n{code}"""
+    
+    response = llm.invoke(prompt)
     
     # Handle cases where response.content might be a list
     content = response.content
@@ -54,10 +51,9 @@ def fixer_node(state: AgentState):
     Fix the code based on the feedback provided. 
     Return ONLY the corrected code. No explanations, no markdown blocks."""
     
-    response = llm.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=f"Original Code:\n{code}\n\nFeedback:\n{feedback}")
-    ])
+    prompt = f"""{system_prompt}\n\nOriginal Code:\n{code}\n\nFeedback:\n{feedback}"""
+    
+    response = llm.invoke(prompt)
     
     # Handle cases where response.content might be a list
     content = response.content
@@ -87,10 +83,9 @@ def verifier_node(state: AgentState):
     If resolved, respond with 'PASSED'.
     If issues still exist or new ones appeared, respond with 'FAILED' and explain why.""".format(feedback=original_feedback)
     
-    response = llm.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=f"Current Code:\n{code}")
-    ])
+    prompt = f"""{system_prompt}\n\nCurrent Code:\n{code}"""
+    
+    response = llm.invoke(prompt)
     
     # Handle cases where response.content might be a list
     content = response.content
@@ -104,4 +99,31 @@ def verifier_node(state: AgentState):
     return {
         "test_results": result,
         "status": "verified"
+    }
+
+def tester_node(state: AgentState):
+    print("--- GENERATING UNIT TESTS ---")
+    code = state["code"]
+    
+    system_prompt = """You are a QA Automation Engineer. Generate comprehensive Python unit tests for the provided code.
+    Use the 'unittest' framework. Include:
+    1. Positive test cases (normal inputs).
+    2. Negative test cases (invalid inputs).
+    3. Edge cases.
+    
+    Return ONLY the Python test code. No explanations, no markdown blocks."""
+    
+    prompt = f"{system_prompt}\n\nCode to test:\n{code}"
+    
+    response = llm.invoke(prompt)
+    
+    content = response.content
+    if isinstance(content, list):
+        result = "".join([part.get("text", "") if isinstance(part, dict) else str(part) for part in content])
+    else:
+        result = str(content)
+        
+    return {
+        "test_code": result.strip(),
+        "status": "testing_complete"
     }

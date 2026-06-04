@@ -1,6 +1,6 @@
 from langgraph.graph import StateGraph, END
 from state import AgentState
-from agents import reviewer_node, fixer_node, verifier_node
+from agents import reviewer_node, fixer_node, verifier_node, tester_node
 
 def should_continue(state: AgentState):
     """
@@ -8,11 +8,11 @@ def should_continue(state: AgentState):
     """
     # If the verifier passed or we've reached max iterations, stop.
     if "PASSED" in state["test_results"].upper():
-        return END
+        return "tester"
     
     if state["iteration"] >= 3:
         print("--- MAX ITERATIONS REACHED ---")
-        return END
+        return "tester"
     
     # Otherwise, if we just fixed or verified, go back to review if failed
     if state["status"] == "verified" and "FAILED" in state["test_results"].upper():
@@ -26,7 +26,7 @@ def check_review_results(state: AgentState):
     """
     feedback = "".join(state["review_feedback"])
     if "NO_ISSUES" in feedback.upper() or not state["review_feedback"]:
-        return END
+        return "tester"
     return "fixer"
 
 # Initialize the Graph
@@ -36,6 +36,7 @@ workflow = StateGraph(AgentState)
 workflow.add_node("reviewer", reviewer_node)
 workflow.add_node("fixer", fixer_node)
 workflow.add_node("verifier", verifier_node)
+workflow.add_node("tester", tester_node)
 
 # Set Entry Point
 workflow.set_entry_point("reviewer")
@@ -46,7 +47,7 @@ workflow.add_conditional_edges(
     check_review_results,
     {
         "fixer": "fixer",
-        END: END
+        "tester": "tester"
     }
 )
 
@@ -57,9 +58,11 @@ workflow.add_conditional_edges(
     should_continue,
     {
         "reviewer": "reviewer",
-        END: END
+        "tester": "tester"
     }
 )
+
+workflow.add_edge("tester", END)
 
 # Compile the Graph
 app = workflow.compile()
@@ -80,6 +83,7 @@ print(calculate_average([]))
         "code": buggy_code,
         "review_feedback": [],
         "test_results": "",
+        "test_code": "",
         "iteration": 0,
         "status": "started"
     }
@@ -90,3 +94,5 @@ print(calculate_average([]))
     print("\n--- FINAL OUTPUT ---")
     print(final_state["code"])
     print(f"\nFinal Status: {final_state['status']}")
+    print("\n--- GENERATED TESTS ---")
+    print(final_state["test_code"])

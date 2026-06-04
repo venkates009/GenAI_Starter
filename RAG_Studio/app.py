@@ -3,10 +3,10 @@ import os
 from dotenv import load_dotenv
 
 # LangChain Imports
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_classic.chains import RetrievalQA
 from langchain_core.prompts import PromptTemplate
 
@@ -15,6 +15,9 @@ load_dotenv()
 os.environ["GOOGLE_API_KEY"] = os.getenv("GEMINI_API_KEY")
 
 st.set_page_config(page_title="Nexus RAG Studio", layout="wide")
+
+# Path to save the vector database on D: drive
+DB_FAISS_PATH = os.path.join(os.getcwd(), "vector_db")
 
 # Custom CSS for a clean, sweet light theme
 st.markdown("""
@@ -70,10 +73,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 2. Core RAG Logic Functions
+def load_pdf(file_path):
+    """Loads PDF and extracts text using PyMuPDF for better accuracy."""
+    loader = PyMuPDFLoader(file_path)
+    documents = loader.load()
+    return documents
+
 def process_pdf(file_path):
     """Extracts text from PDF and splits it into chunks."""
-    loader = PyPDFLoader(file_path)
-    documents = loader.load()
+    documents = load_pdf(file_path)
     
     # Chunking: 1000 characters per chunk with 200 character overlap
     # Overlap helps maintain context between chunks
@@ -81,15 +89,41 @@ def process_pdf(file_path):
     chunks = text_splitter.split_documents(documents)
     return chunks
 
+import re
+
+def clean_text(text):
+    """Removes extra spaces and fixes broken words often found in PDF extraction."""
+    # Remove multiple spaces/newlines
+    text = re.sub(r'\s+', ' ', text)
+    # Optional: Fix spaces between characters (e.g., "a n y" -> "any")
+    # But only if it looks like a pattern. For now, basic cleaning is safer.
+    return text.strip()
+
 def create_vector_db(chunks):
-    """Converts text chunks into embeddings and saves them in FAISS."""
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
+    """Converts text chunks into embeddings and saves them in FAISS locally."""
+    # Clean the text in each chunk before embedding
+    for chunk in chunks:
+        chunk.page_content = clean_text(chunk.page_content)
+        
+    # Using local Ollama embedding model
+    embeddings = OllamaEmbeddings(model="nomic-embed-text")
     vector_db = FAISS.from_documents(chunks, embeddings)
+    
+    # Save the index to local storage
+    vector_db.save_local(DB_FAISS_PATH)
     return vector_db
 
+def load_existing_db():
+    """Loads a previously saved FAISS index."""
+    if os.path.exists(DB_FAISS_PATH):
+        embeddings = OllamaEmbeddings(model="nomic-embed-text")
+        vector_db = FAISS.load_local(DB_FAISS_PATH, embeddings, allow_dangerous_deserialization=True)
+        return vector_db
+    return None
+
 def get_rag_chain(vector_db):
-    """Creates a RetrievalQA chain using Gemini."""
-    llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0.3)
+    """Creates a RetrievalQA chain using local Ollama model."""
+    llm = ChatOllama(model="gemma2:2b", temperature=0.3)
     
     # Custom Prompt Template
     template = """You are a professional research assistant. Use the following pieces of context to answer the question at the end. 
@@ -133,7 +167,21 @@ with st.sidebar:
                 chunks = process_pdf(temp_path)
                 vector_db = create_vector_db(chunks)
                 st.session_state.vector_db = vector_db
-                st.success("Indexing Complete!")
+                st.success("Indexing & Local Saving Complete!")
+
+    st.markdown("---")
+    st.header("Storage")
+    if os.path.exists(DB_FAISS_PATH):
+        if st.button("Load Saved Index"):
+            with st.spinner("Loading from D: drive..."):
+                vector_db = load_existing_db()
+                if vector_db:
+                    st.session_state.vector_db = vector_db
+                    st.success("Saved Index Loaded!")
+                else:
+                    st.error("Failed to load index.")
+    else:
+        st.info("No saved index found.")
 
 # Main Chat Interface
 if "messages" not in st.session_state:
